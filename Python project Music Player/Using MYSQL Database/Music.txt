@@ -1,0 +1,164 @@
+import tkinter as tk
+from tkinter import ttk
+import pygame
+from threading import Thread
+import time
+import mysql.connector
+
+class MusicPlayer:
+    def __init__(self, root):
+        self.root = root
+        root.title("Music Player")
+        self.root.geometry('800x300')
+        self.root.resizable(width=False, height=False)
+        self.current_song_index = 0
+        self.paused = False
+        self.root_style = {'bg': 'black'}
+        self.music_names = []
+
+        pygame.init()
+
+        self.button_style = {
+            'bg': '#3498db',  # Blue color
+            'fg': 'white',
+            'font': ('Arial', 12, 'bold'),
+            'bd': 3,
+            'relief': 'raised'
+        }
+
+        self.music_progress_style = ttk.Style()
+        self.music_progress_style.configure("Horizontal.TProgressbar", troughcolor='#bdc3c7')
+
+        self.music_progress_bar = ttk.Progressbar(self.root, orient='horizontal', length=475, mode='determinate', style="Horizontal.TProgressbar")
+        self.music_progress_bar.grid(row=1, column=0, columnspan=4, padx=10, pady=(10, 0), sticky='ew')
+
+        self.current_file_label = tk.Label(self.root, text="", font=('Arial', 12))
+        self.current_file_label.grid(row=0, column=0, columnspan=4, pady=(10, 0))
+
+        self.button_frame = tk.Frame(self.root)
+        self.button_frame.grid(row=2, column=0, columnspan=4, pady=(5, 30))
+
+        self.prev_button = tk.Button(self.button_frame, text='Previous', command=self.play_previous, width=10, height=2)
+        self.prev_button.pack(side=tk.LEFT, padx=10)
+
+        self.play_button = tk.Button(self.button_frame, text='Play', command=self.play_music, width=10, height=2)
+        self.play_button.pack(side=tk.LEFT, padx=10)
+
+        self.pause_button = tk.Button(self.button_frame, text='Pause', command=self.pause_music, width=10, height=2)
+        self.pause_button.pack(side=tk.LEFT, padx=10)
+
+        self.resume_button = tk.Button(self.button_frame, text='Resume', command=self.resume_music, state='disabled', width=10, height=2)
+        self.resume_button.pack(side=tk.LEFT, padx=10)
+
+        self.next_button = tk.Button(self.button_frame, text='Next', command=self.play_next, width=10, height=2)
+        self.next_button.pack(side=tk.LEFT, padx=10)
+
+        self.loop_button = tk.Button(self.button_frame, text='Loop', command=self.toggle_loop, width=10, height=2)
+        self.loop_button.pack(side=tk.LEFT, padx=10)
+
+        for button in [self.prev_button, self.play_button, self.pause_button, self.resume_button, self.next_button, self.loop_button]:
+            button.configure(**self.button_style)
+        self.loop_enabled = False
+
+        self.root.grid_rowconfigure(1, weight=1)
+
+        # Connect to MySQL database
+        self.db_connection = mysql.connector.connect(
+            host='localhost',
+            user='root',
+            password='admin@123',
+            database='music_database'
+        )
+        self.cursor = self.db_connection.cursor()
+
+    def get_music_paths_from_database(self):
+        self.cursor.execute("SELECT file_path FROM MusicFile")
+        rows = self.cursor.fetchall()
+        return [row[0] for row in rows]
+
+    def get_music_names_from_database(self):
+        self.cursor.execute("SELECT file_name FROM MusicFile")
+        rows = self.cursor.fetchall()
+        return [row[0] for row in rows]
+
+    def display_file_names(self):
+        self.music_names = self.get_music_names_from_database()
+        self.current_file_label.config(text=self.get_current_song_name())  # Update label with the first song name
+        for idx, name in enumerate(self.music_names, start=1):
+            label = tk.Label(self.root, text=name, font=('Arial', 12))
+            label.grid(row=idx + 2, column=0, columnspan=4, pady=(5, 0))
+
+    def play_music(self):
+        self.file_paths = self.get_music_paths_from_database()
+
+        # Update the label to display the current file name
+        self.current_file_label.config(text=self.get_current_song_name())
+
+        if self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+        else:
+            pygame.mixer.music.load(self.file_paths[self.current_song_index])
+            pygame.mixer.music.play()
+
+        self.resume_button.config(state='normal')
+        self.music_progress_bar.config(maximum=self.get_music_length())
+        progress_thread = Thread(target=self.update_progress_bar)
+        progress_thread.start()
+
+    def get_current_song_name(self):
+        return self.music_names[self.current_song_index]
+
+    def pause_music(self):
+        pygame.mixer.music.pause()
+        self.paused = True
+
+    def resume_music(self):
+        pygame.mixer.music.unpause()
+        self.paused = False
+
+    def toggle_loop(self):
+        self.loop_enabled = not self.loop_enabled
+        if self.loop_enabled:
+            print('Loop enabled: Play one song multiple times')
+        else:
+            print('Loop disabled: Play each song once')
+
+    def play_next(self):
+        if len(self.file_paths) == 0:
+            return
+
+        self.current_song_index = (self.current_song_index + 1) % len(self.file_paths)
+        pygame.mixer.music.load(self.file_paths[self.current_song_index])
+        pygame.mixer.music.play()
+        self.current_file_label.config(text=self.get_current_song_name())  # Update current song label
+        self.resume_button.config(state='normal')
+        self.music_progress_bar.config(maximum=self.get_music_length())
+
+    def play_previous(self):
+        if len(self.file_paths) == 0:
+            return
+
+        self.current_song_index = (self.current_song_index - 1) % len(self.file_paths)
+        pygame.mixer.music.load(self.file_paths[self.current_song_index])
+        pygame.mixer.music.play()
+        self.current_file_label.config(text=self.get_current_song_name())  # Update current song label
+        self.resume_button.config(state='normal')
+        self.music_progress_bar.config(maximum=self.get_music_length())
+
+    def get_music_length(self):
+        audio = pygame.mixer.Sound(self.file_paths[self.current_song_index])
+        return int(audio.get_length())
+
+    def update_progress_bar(self):
+        while pygame.mixer.music.get_busy():
+            current_time = pygame.mixer.music.get_pos() / 1000
+            self.music_progress_bar['value'] = current_time
+            time.sleep(1)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    obj = MusicPlayer(root)
+    obj.display_file_names()
+    obj.play_music()
+    root.mainloop()
